@@ -6,10 +6,12 @@ import (
 )
 
 const (
-	numReplicas     = 6
+	numReplicas     = 7
 	timeoutInterval = 5 * time.Second // 1. detect dead coordinator 2. become coordinator
 	syncInterval    = 1 * time.Second
 )
+
+var announceFailCount = 0
 
 type Replica struct {
 	id            int
@@ -180,14 +182,14 @@ func (r *Replica) initiateElection() {
 
 			r.isCoordinator.Set(true)
 
-			r.startSync()
-
+			if announceFailCount == 0 {
+				announceFailCount++
+				r.shutdownSignalChan <- struct{}{}
+			} else {
+				r.startSync()
+			}
 		}
 	}()
-
-}
-
-func (r *Replica) stopDataListening() {
 
 }
 
@@ -199,11 +201,11 @@ func main() {
 			id:   i,
 			data: fmt.Sprintf("data_%d", i),
 
-			shutdownSignalChan:     make(chan struct{}, 1),
-			shutdownDataChan:       make(chan struct{}, 1),
-			shutdownTimeoutChan:    make(chan struct{}, 1),
-			shutdownSyncChan:       make(chan struct{}, 1),
-			resetTimeoutSignalChan: make(chan struct{}, 1),
+			shutdownSignalChan:     make(chan struct{}),
+			shutdownDataChan:       make(chan struct{}),
+			shutdownTimeoutChan:    make(chan struct{}),
+			shutdownSyncChan:       make(chan struct{}),
+			resetTimeoutSignalChan: make(chan struct{}),
 
 			isAlive:       ConcurrentBoolean{value: true},
 			isInElection:  ConcurrentBoolean{value: false},
@@ -230,7 +232,8 @@ func main() {
 	for i := 0; i < numReplicas; i++ {
 		if replicas[i].isCoordinator.Get() {
 			replicas[i].shutdownSignalChan <- struct{}{}
-			fmt.Printf("stopping %d !!!!!\n", i)
+			replicas[0].shutdownSignalChan <- struct{}{}       // 0 fail
+			fmt.Printf("stopping %d !!!!! 0 fails also.\n", i) // 6. but 5 fails also, so 4
 			break
 		}
 	}
@@ -239,15 +242,7 @@ func main() {
 	for i := 0; i < numReplicas; i++ {
 		if replicas[i].isCoordinator.Get() {
 			replicas[i].shutdownSignalChan <- struct{}{}
-			fmt.Printf("stopping %d !!!!!\n", i)
-			break
-		}
-	}
-	time.Sleep(30 * time.Second)
-	for i := 0; i < numReplicas; i++ {
-		if replicas[i].isCoordinator.Get() {
-			replicas[i].shutdownSignalChan <- struct{}{}
-			fmt.Printf("stopping %d !!!!!\n", i)
+			fmt.Printf("stopping %d !!!!!\n", i) // 4, then all data 3
 			break
 		}
 	}
